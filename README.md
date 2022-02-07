@@ -1,1 +1,1 @@
-# cs231n
+### В данном репозитории представлены решения заданий курса [CS231n: Convolutional Neural Networks  for Visual Recognition](http://cs231n.stanford.edu/) представленного Stanford University (за 2020 год).
