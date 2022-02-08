@@ -23,6 +23,7 @@ class KNearestNeighbor(object):
         """
         self.X_train = X
         self.y_train = y
+        self.dists = None
 
     def predict(self, X, k=1, num_loops=0):
         """
@@ -77,7 +78,8 @@ class KNearestNeighbor(object):
                 #####################################################################
                 # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-                pass
+                dists[i,j]=np.sqrt(np.sum((X[i] - self.X_train[j])**2))
+        self.dists = dists
 
                 # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         return dists
@@ -101,7 +103,9 @@ class KNearestNeighbor(object):
             #######################################################################
             # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-            pass
+            dists[i]= np.sqrt(np.sum((self.X_train-X[i])**2, axis =1))
+            
+        self.dists = dists
 
             # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         return dists
@@ -131,7 +135,15 @@ class KNearestNeighbor(object):
         #########################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        # (a-b)^2 = a^2 - 2ab + b^2
+        # Sum[(a-b)^2] = a1^2 + a2^2 + ... a64^2 - 2a1b1 - 2a2b2 - ... - 2a64 2b64 + b1^2 + b2^2 + b64^2]
+        A_2 = np.sum(self.X_train**2,axis = 1) # ai^2 [num_train,64] -> [num_train,1]
+        B_2 = np.sum(X**2, axis = 1) # bi^2 [num_test,64] -> [num_test,1]
+        
+        double_AB = np.dot(self.X_train,X.T) #  [num_train, 64]x[64, num_test] = [num_train,num_test] 
+        
+        dists = np.sqrt(A_2.reshape(-1,1) - 2*double_AB  + B_2).T
+        self.dists = dists
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         return dists
@@ -164,7 +176,8 @@ class KNearestNeighbor(object):
             #########################################################################
             # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-            pass
+            closest_y=np.argsort(dists[i])[:k] ## индексы отсортированных расстояний в порядке возрастания, выберем первые К элементов
+            closest_y = self.y_train[closest_y] ## найдем соответствующие метки классов
 
             # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
             #########################################################################
@@ -176,7 +189,8 @@ class KNearestNeighbor(object):
             #########################################################################
             # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-            pass
+            unique_labels, counts_labels = np.unique(closest_y, return_counts=True)
+            y_pred[i] = unique_labels[np.argmax(counts_labels)]
 
             # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 

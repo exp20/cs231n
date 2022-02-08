@@ -36,6 +36,10 @@ def svm_loss_naive(W, X, y, reg):
             margin = scores[j] - correct_class_score + 1 # note delta = 1
             if margin > 0:
                 loss += margin
+                #estimate gradient w_j
+                dW[:,j] +=X[i]
+                #estimate gradient w_yi
+                dW[:,y[i]] += -1*X[i]
 
     # Right now the loss is a sum over all training examples, but we want it
     # to be an average instead so we divide by num_train.
@@ -54,7 +58,7 @@ def svm_loss_naive(W, X, y, reg):
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    dW = (1/num_train)*dW+2*reg*W
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     
@@ -78,7 +82,17 @@ def svm_loss_vectorized(W, X, y, reg):
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    '''
+    W (D,C)
+    X (N,D)
+    y (N)
+    '''
+    scores = X.dot(W) # (N,C)
+    correct_class_scores = scores[np.arange(0,len(y),1),y] # (N)
+    margins = scores - correct_class_scores.reshape(len(y),1)+1
+    margins[np.arange(0,len(y),1),y] = 0 # когда j = yi
+    loss = np.sum(margins[margins>0])/len(y)
+    loss += reg*np.sum(W*W)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
@@ -93,7 +107,11 @@ def svm_loss_vectorized(W, X, y, reg):
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    margins[margins > 0] = 1
+    valid_margin_count = margins.sum(axis=1)
+    margins[np.arange(len(y)),y ] -= valid_margin_count # w_yi
+    dW = (X.T).dot(margins) / len(y)
+    dW = dW + reg * 2 * W
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
