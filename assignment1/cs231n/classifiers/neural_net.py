@@ -118,7 +118,7 @@ class TwoLayerNet(object):
 
         data_loss_local_arr = scores_yi/np.sum(scores_exp,axis = 1) # (1,N) / (1,N)
     
-        data_loss = (-1/len(y))*np.sum(np.log(data_loss_local_arr))
+        data_loss = (-1/len(y))*np.sum(np.log(data_loss_local_arr + 1e-11))
         
         'regularization loss'
         reg_loss = reg*(np.sum(W1*W1)+np.sum(W2*W2))
