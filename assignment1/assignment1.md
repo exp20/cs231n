@@ -16,16 +16,11 @@ In this assignment you will practice putting together a simple image classificat
 
 
 ### Q1: k-Nearest Neighbor classifier (20 points)
-
-The notebook **knn.ipynb** will walk you through implementing the kNN classifier.
-
 ### Q2: Training a Support Vector Machine (25 points)
-
-The notebook **svm.ipynb** will walk you through implementing the SVM classifier.
-
 ### Q3: Implement a Softmax classifier (20 points)
 
-The notebook **softmax.ipynb** will walk you through implementing the Softmax classifier.
+Работа с классификаторами kNN, SVM, Softmax выполнена в **lab1.ipynb**. А реализованы в **"./scripts/classifiers/"**.
+Далее все файлы заданий (assignment1,2,3) расположены согласно оригинальной структуре курсов cs231n (2020).
 
 ### Q4: Two-Layer Neural Network (25 points)
 
