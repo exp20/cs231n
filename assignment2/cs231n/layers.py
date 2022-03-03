@@ -203,7 +203,25 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        '''
+        1) вычисление статистики для текущего батча
+        2) нормализация признаков в батче по вычисленным статистикам c параметрами масштаба и сдвига
+        3) обновление скользящих средних и дисперсий - эти значения будут использованы во время инференса (на тестовых данных)
+        '''
+        mx = np.mean(x,axis = 0) # (1,D)
+        x_centered = x - mx # (N,D)
+        x_centered_sq = x_centered**2
+        Dx = np.mean(x_centered_sq,axis = 0)
+        std = np.sqrt(Dx+eps) # (1,D) # добавление eps =1e-5
+        inverted_std = 1/std # (1,D) добавление сюда eps = 1e-5 дает ошибку dx  порядка 1e-5 
+        x_normed = x_centered*inverted_std # (N,D)
+        out = gamma*x_normed + beta 
+
+        # эти средние и дисперсии будут использованы во время инференса
+        running_mean = momentum*running_mean + (1-momentum)*mx # (1,D)
+        running_var = momentum*running_var + (1-momentum)*Dx # (1,D)
+
+        cache = (gamma,x_normed,inverted_std,x_centered,std,Dx,eps)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -218,7 +236,8 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        x_normed = (x-running_mean)/(np.sqrt(running_var+eps))
+        out = gamma*x_normed + beta
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -260,8 +279,28 @@ def batchnorm_backward(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    gamma,x_normed,inverted_std,x_centered,std,Dx,eps = cache
+    N,D = x_centered.shape
+     
+    # сумма так как у нас градиент вычисляется по батчу (нескольким экземплярам данных) => сумма градиентов
+    dgamma = np.sum(x_normed*dout,axis = 0) # (N,D) * (N,D)=(1,D) 
+    dx_normed = dout*gamma # = (N,D)
+    dbeta = np.sum(dout,axis = 0)  # =(1,D)
 
+    dx_centered = dx_normed*inverted_std # =(N,D)
+    dinverted_std = np.sum(dx_normed*x_centered, axis = 0) # = (1,D)
+    dstd = dinverted_std*(-1)*std**(-2)
+    dDx = dstd*0.5/np.sqrt(Dx + eps) # так как eps добавляли под корень, eps нужно взять тот что был при forward pass
+    dx_centered_sq = dDx/N*np.ones((N,D)) # =(N,D)
+    
+    dx_centered_2 = dx_centered_sq*2*x_centered # (N,D)
+    dx_centered += dx_centered_2
+    dx = dx_centered*1
+    dmx = (-1)*np.sum(dx_centered, axis = 0) # (1,D) 
+    dx_2 = dmx/N*np.ones((N,D)) # (N,D) 
+    dx+= dx_2
+    ## умножение на np.ones((N,D)) по сути вычислений ничего не меняет , это сделано для контроля размерности, можно и обойтись этим
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -295,8 +334,21 @@ def batchnorm_backward_alt(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    gamma,x_normed,inverted_std,x_centered,std,_,_ = cache
+    N,D = x_centered.shape
 
+    dgamma = np.sum(dout*x_normed,axis = 0)
+    dbeta = np.sum(dout, axis = 0)
+    dL_dx_normed = dout*gamma # (N,D)
+    
+    # Dx - дисперсия, mx - мат. ожидание
+    dL_dDx = np.sum(dL_dx_normed*x_centered, axis = 0)*-0.5*inverted_std**3 # тут такая подстановка  std**(-3) = inverted_std**3 чтоб не пересчиытвать
+    # dL/dmx = ([dL/dDx*dDx/dmx] + [dL/dxnorm*dxnorm/dmx]), dL/dDx dDx/dmx = 0 
+    dL_dmx =  np.sum(-dL_dx_normed/std, axis = 0)  # (1,D)
+    #dL/dx = dL/dDx * dDx/dx + dL/dmx * dmx/dx + dL/dx_norm * dxnorm/dx * dmx/dx
+    dx =  dL_dDx*2*x_centered/N + dL_dmx/N + inverted_std*dout*gamma # (N,D)
+    
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #

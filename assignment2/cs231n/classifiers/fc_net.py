@@ -214,8 +214,25 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        prev_layer_size = input_dim
+        i = 1
+        for layer_size in hidden_dims: # только скрытые слои
+          self.params["W{0}".format(i)] = weight_scale * np.random.randn(prev_layer_size, layer_size)
+          self.params["b{0}".format(i)] = np.zeros(layer_size)
+          prev_layer_size = layer_size
+          i+=1
+        # выходной слой перед softmax
+        self.params["W{0}".format(i)] = weight_scale * np.random.randn(prev_layer_size, num_classes)
+        self.params["b{0}".format(i)] = np.zeros(num_classes)
 
+        if(self.normalization == "batchnorm"):
+          i = 1
+          for layer_size in hidden_dims: # на последнем слое нет нормализации
+            self.params["gamma{0}".format(i)] = np.ones(layer_size)
+            self.params["beta{0}".format(i)] = np.zeros(layer_size)
+            i+=1
+
+        
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -276,7 +293,34 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        affine_relu_caches = {} # кэш affine_relu_forward для каждого слоя
+        batch_norm_caches = {} # кэш слоя батч нормализации, содержит значения необходимые для вычисления градиента
+        layer_input = X
+
+        if(self.normalization is None):
+          for layer_number in range(0,self.num_layers-1):
+            # affine + relu
+            curr_layer_out, curr_layer_cache = affine_relu_forward(layer_input, self.params["W{0}".format(layer_number+1)],
+                                                              self.params["b{0}".format(layer_number+1)]) # +1 т.к W1 W2 W3 ...
+            affine_relu_caches[layer_number] = curr_layer_cache 
+            layer_input = curr_layer_out
+
+        if(self.normalization == "batchnorm"):
+          for layer_number in range(0,self.num_layers-1):
+            batchnorm_out, batchnorm_cache = affine_batchnorm_relu_forward(layer_input,
+                                              self.params["W{0}".format(layer_number+1)],
+                                              self.params["b{0}".format(layer_number+1)],
+                                              self.params["gamma{0}".format(layer_number+1)], 
+                                              self.params["beta{0}".format(layer_number+1)], 
+                                              self.bn_params[layer_number])
+            batch_norm_caches[layer_number] = batchnorm_cache
+            layer_input = batchnorm_out
+
+    
+        # последний слой перед softmax без ReLU !!!
+        scores, last_l_cache = affine_forward(layer_input, self.params["W{0}".format(self.num_layers)], 
+                                                    self.params["b{0}".format(self.num_layers)])
+        affine_relu_caches[self.num_layers-1] = last_l_cache                                               
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -303,7 +347,40 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        data_loss, dscores = softmax_loss(scores,y)
+
+        # подсчет reg_loss
+        W_square_sum = 0
+        for i in range(1,self.num_layers+1):
+          W_square_sum += np.sum(self.params["W{0}".format(i)]**2)
+          grads["W{0}".format(i)] = self.reg*self.params["W{0}".format(i)] # 2*0.5 = 1
+        reg_loss = self.reg*0.5*W_square_sum
+
+        loss = data_loss + reg_loss
+
+        upstream_gradient = dscores
+        dx, dw, db = affine_backward(upstream_gradient,last_l_cache) # последний слой перед softmax и он без ReLU
+        grads["W{0}".format(self.num_layers)] += dw # так как там уже dreg_loss/dw
+        grads["b{0}".format(self.num_layers)] = db
+        upstream_gradient = dx
+
+        if(self.normalization == "batchnorm"):
+          for layer_number in range (self.num_layers-1,0,-1): #  последнее число будет 1 
+            dx, dw, db, dgamma, dbeta =  affine_batchnorm_relu_backward(upstream_gradient, batch_norm_caches[layer_number-1]) # -1 так как там индексация с 0
+            upstream_gradient = dx
+            grads["W{0}".format(layer_number)] += dw # так как там уже dreg_loss/dw
+            grads["b{0}".format(layer_number)] = db
+            grads["gamma{0}".format(layer_number)] = dgamma
+            grads["beta{0}".format(layer_number)] = dbeta
+
+
+        if(self.normalization is None): 
+          for layer_number in range (self.num_layers-1,0,-1): #  последнее число будет 1 
+            dx, dw, db = affine_relu_backward(upstream_gradient, affine_relu_caches[layer_number-1]) # -1 так как там индексация с 0
+            upstream_gradient = dx
+            grads["W{0}".format(layer_number)] += dw # так как там уже dreg_loss/dw
+            grads["b{0}".format(layer_number)] = db
+            
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -311,3 +388,19 @@ class FullyConnectedNet(object):
         ############################################################################
 
         return loss, grads
+
+def affine_batchnorm_relu_forward(x, w, b, gamma, beta, bn_param):
+  # affine -> batchnorm -> relu
+  a, fc_cache = affine_forward(x, w, b)
+  bn, bn_cache = batchnorm_forward(a, gamma, beta, bn_param)
+  out, relu_cache = relu_forward(bn)
+  cache = (fc_cache, bn_cache, relu_cache)
+  return out, cache
+
+
+def affine_batchnorm_relu_backward(dout, cache):
+  fc_cache, bn_cache, relu_cache = cache
+  da = relu_backward(dout, relu_cache)
+  db, dgamma, dbeta = batchnorm_backward_alt(da,bn_cache)
+  dx, dw, db = affine_backward(db, fc_cache)
+  return dx, dw, db, dgamma, dbeta
