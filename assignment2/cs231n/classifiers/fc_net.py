@@ -225,7 +225,7 @@ class FullyConnectedNet(object):
         self.params["W{0}".format(i)] = weight_scale * np.random.randn(prev_layer_size, num_classes)
         self.params["b{0}".format(i)] = np.zeros(num_classes)
 
-        if(self.normalization == "batchnorm"):
+        if((self.normalization == "batchnorm") or (self.normalization == "layernorm")):
           i = 1
           for layer_size in hidden_dims: # на последнем слое нет нормализации
             self.params["gamma{0}".format(i)] = np.ones(layer_size)
@@ -295,6 +295,8 @@ class FullyConnectedNet(object):
 
         affine_relu_caches = {} # кэш affine_relu_forward для каждого слоя
         batch_norm_caches = {} # кэш слоя батч нормализации, содержит значения необходимые для вычисления градиента
+        layer_norm_caches = {} # кэш для нормализации по слою, содержит значения необходимые для вычисления градиента
+        dropout_caches = {}
         layer_input = X
 
         if(self.normalization is None):
@@ -302,8 +304,12 @@ class FullyConnectedNet(object):
             # affine + relu
             curr_layer_out, curr_layer_cache = affine_relu_forward(layer_input, self.params["W{0}".format(layer_number+1)],
                                                               self.params["b{0}".format(layer_number+1)]) # +1 т.к W1 W2 W3 ...
-            affine_relu_caches[layer_number] = curr_layer_cache 
+            affine_relu_caches[layer_number] = curr_layer_cache
             layer_input = curr_layer_out
+            if(self.use_dropout):
+              layer_input, dropout_cache = dropout_forward(curr_layer_out, self.dropout_param)
+              dropout_caches[layer_number] = dropout_cache
+              
 
         if(self.normalization == "batchnorm"):
           for layer_number in range(0,self.num_layers-1):
@@ -315,6 +321,23 @@ class FullyConnectedNet(object):
                                               self.bn_params[layer_number])
             batch_norm_caches[layer_number] = batchnorm_cache
             layer_input = batchnorm_out
+            if(self.use_dropout):
+              layer_input, dropout_cache = dropout_forward(batchnorm_out, self.dropout_param)
+              dropout_caches[layer_number] = dropout_cache
+
+        if(self.normalization == "layernorm"):
+          for layer_number in range(0,self.num_layers-1):
+            layernorm_out, layernorm_cache = affine_layernorm_relu_forward(layer_input,
+                                              self.params["W{0}".format(layer_number+1)],
+                                              self.params["b{0}".format(layer_number+1)],
+                                              self.params["gamma{0}".format(layer_number+1)], 
+                                              self.params["beta{0}".format(layer_number+1)], 
+                                              self.bn_params[layer_number])
+            layer_norm_caches[layer_number] = layernorm_cache
+            layer_input = layernorm_out
+            if(self.use_dropout):
+              layer_input, dropout_cache = dropout_forward(layernorm_out, self.dropout_param)
+              dropout_caches[layer_number] = dropout_cache
 
     
         # последний слой перед softmax без ReLU !!!
@@ -366,16 +389,32 @@ class FullyConnectedNet(object):
 
         if(self.normalization == "batchnorm"):
           for layer_number in range (self.num_layers-1,0,-1): #  последнее число будет 1 
+            if(self.use_dropout):
+              upstream_gradient = dropout_backward(upstream_gradient, dropout_caches[layer_number-1])
             dx, dw, db, dgamma, dbeta =  affine_batchnorm_relu_backward(upstream_gradient, batch_norm_caches[layer_number-1]) # -1 так как там индексация с 0
             upstream_gradient = dx
             grads["W{0}".format(layer_number)] += dw # так как там уже dreg_loss/dw
             grads["b{0}".format(layer_number)] = db
             grads["gamma{0}".format(layer_number)] = dgamma
             grads["beta{0}".format(layer_number)] = dbeta
+            
+            
 
+        if(self.normalization == "layernorm"):
+          for layer_number in range (self.num_layers-1,0,-1): #  последнее число будет 1 
+            if(self.use_dropout):
+              upstream_gradient = dropout_backward(upstream_gradient, dropout_caches[layer_number-1])
+            dx, dw, db, dgamma, dbeta =  affine_layernorm_relu_backward(upstream_gradient, layer_norm_caches[layer_number-1]) # -1 так как там индексация с 0
+            upstream_gradient = dx
+            grads["W{0}".format(layer_number)] += dw # так как там уже dreg_loss/dw
+            grads["b{0}".format(layer_number)] = db
+            grads["gamma{0}".format(layer_number)] = dgamma
+            grads["beta{0}".format(layer_number)] = dbeta
 
         if(self.normalization is None): 
           for layer_number in range (self.num_layers-1,0,-1): #  последнее число будет 1 
+            if(self.use_dropout):
+              upstream_gradient = dropout_backward(upstream_gradient, dropout_caches[layer_number-1])
             dx, dw, db = affine_relu_backward(upstream_gradient, affine_relu_caches[layer_number-1]) # -1 так как там индексация с 0
             upstream_gradient = dx
             grads["W{0}".format(layer_number)] += dw # так как там уже dreg_loss/dw
@@ -397,10 +436,24 @@ def affine_batchnorm_relu_forward(x, w, b, gamma, beta, bn_param):
   cache = (fc_cache, bn_cache, relu_cache)
   return out, cache
 
-
 def affine_batchnorm_relu_backward(dout, cache):
   fc_cache, bn_cache, relu_cache = cache
   da = relu_backward(dout, relu_cache)
   db, dgamma, dbeta = batchnorm_backward_alt(da,bn_cache)
   dx, dw, db = affine_backward(db, fc_cache)
+  return dx, dw, db, dgamma, dbeta
+
+def affine_layernorm_relu_forward(x, w, b, gamma, beta, ln_param):
+  # affine -> layernorm -> relu
+  a, fc_cache = affine_forward(x, w, b)
+  ln, ln_cache = layernorm_forward(a, gamma, beta, ln_param)
+  out, relu_cache = relu_forward(ln)
+  cache = (fc_cache, ln_cache, relu_cache)
+  return out, cache
+
+def affine_layernorm_relu_backward(dout, cache):
+  fc_cache, ln_cache, relu_cache = cache
+  da = relu_backward(dout, relu_cache)
+  dl, dgamma, dbeta = layernorm_backward(da,ln_cache)
+  dx, dw, db = affine_backward(dl, fc_cache)
   return dx, dw, db, dgamma, dbeta

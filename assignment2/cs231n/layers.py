@@ -27,7 +27,8 @@ def affine_forward(x, w, b):
     # will need to reshape the input into rows.                               #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-    # для чего-то нужно сохранять первоначальную размерность x
+    # на входе пакет изображений, преобразования массива пикселей изображений в строку
+    
     X = x.reshape((len(x),-1)) # (N,D)
     out = X.dot(w)+b # (N,D)x(D,M) = (N,M)
 
@@ -217,11 +218,14 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         x_normed = x_centered*inverted_std # (N,D)
         out = gamma*x_normed + beta 
 
-        # эти средние и дисперсии будут использованы во время инференса
-        running_mean = momentum*running_mean + (1-momentum)*mx # (1,D)
-        running_var = momentum*running_var + (1-momentum)*Dx # (1,D)
-
-        cache = (gamma,x_normed,inverted_std,x_centered,std,Dx,eps)
+        # для вычисления прямого прохода layer norm можно исп код написанный для batch norm
+        if (not bn_param.get("layer_norm", False)): # для батч нормализации
+          # эти средние и дисперсии будут использованы во время инференса
+          running_mean = momentum*running_mean + (1-momentum)*mx # (1,D)
+          running_var = momentum*running_var + (1-momentum)*Dx # (1,D)
+          cache = (gamma,x_normed,inverted_std,x_centered,std,Dx,eps, "batch_norm")
+        else: # для layer norm
+          cache = (gamma,x_normed,inverted_std,x_centered,std,Dx,eps, "layer_norm")
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -279,13 +283,20 @@ def batchnorm_backward(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    gamma,x_normed,inverted_std,x_centered,std,Dx,eps = cache
+    gamma,x_normed,inverted_std,x_centered,std,Dx,eps, norm_type = cache
     N,D = x_centered.shape
-     
+
+    # используем уже написанный код для вычисления градиентов layer norm
+    axis = 0 # если "batch_norm"
+    if norm_type == "layer_norm": 
+      axis = 1 # используется только для dgamma, dbeta
+      '''
+      layer_norm: dout (D,N), x_normed (D,N), dgamma, dbeta (1,D)
+      '''
     # сумма так как у нас градиент вычисляется по батчу (нескольким экземплярам данных) => сумма градиентов
-    dgamma = np.sum(x_normed*dout,axis = 0) # (N,D) * (N,D)=(1,D) 
+    dgamma = np.sum(x_normed*dout,axis = axis) # (N,D) * (N,D)=(1,D) 
     dx_normed = dout*gamma # = (N,D)
-    dbeta = np.sum(dout,axis = 0)  # =(1,D)
+    dbeta = np.sum(dout,axis = axis)  # =(1,D)
 
     dx_centered = dx_normed*inverted_std # =(N,D)
     dinverted_std = np.sum(dx_normed*x_centered, axis = 0) # = (1,D)
@@ -334,20 +345,26 @@ def batchnorm_backward_alt(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    gamma,x_normed,inverted_std,x_centered,std,_,_ = cache
+    gamma,x_normed,inverted_std,x_centered,std,_,_,norm_type = cache
     N,D = x_centered.shape
 
-    dgamma = np.sum(dout*x_normed,axis = 0)
-    dbeta = np.sum(dout, axis = 0)
-    dL_dx_normed = dout*gamma # (N,D)
-    
+    # используем уже написанный код для вычисления градиентов layer norm
+    axis = 0 # "batch_norm"
+    if norm_type == "layer_norm":
+      axis = 1
+      '''
+      для layer_norm: dout (D,N), x_normed (D,N), dgamma, dbeta (1,D)
+      '''
+    dgamma = np.sum(dout*x_normed,axis = axis) # (1,D) // для layer norm (1,D), dout*x_normed (D,N)
+    dbeta = np.sum(dout, axis = axis) # (1,D) // для layer norm (1,D)
+    dL_dx_normed = dout*gamma # (N,D) // для layer norm подается dout.T (D,N), в кэше gamma, beta  (1,D) уже в виде вектора столца (D,1)
+
     # Dx - дисперсия, mx - мат. ожидание
     dL_dDx = np.sum(dL_dx_normed*x_centered, axis = 0)*-0.5*inverted_std**3 # тут такая подстановка  std**(-3) = inverted_std**3 чтоб не пересчиытвать
     # dL/dmx = ([dL/dDx*dDx/dmx] + [dL/dxnorm*dxnorm/dmx]), dL/dDx dDx/dmx = 0 
     dL_dmx =  np.sum(-dL_dx_normed/std, axis = 0)  # (1,D)
     #dL/dx = dL/dDx * dDx/dx + dL/dmx * dmx/dx + dL/dx_norm * dxnorm/dx * dmx/dx
     dx =  dL_dDx*2*x_centered/N + dL_dmx/N + inverted_std*dout*gamma # (N,D)
-    
     
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -392,8 +409,23 @@ def layernorm_forward(x, gamma, beta, ln_param):
     # the batch norm code and leave it almost unchanged?                      #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
+    
+    '''
+    x = x.T #(D,N)
+    mean_features = np.mean(x, axis = 0) # (1,N)
+    f_centered = (x - mean_features) # (D,N)
+    variance_features = np.mean(f_centered**2, axis = 0) # (1,N)
+    std = np.sqrt(variance_features + eps) # (1, N)
+    inverted_std = 1/std
+    features_normalized = (x - mean_features)*inverted_std
+    out = gamma.reshape((-1,1)) * features_normalized + beta.reshape((-1,1))
+    out = out.T
+    '''
+    # используем код уже написанный для batch norm
+    ln_param["mode"] = "train"
+    ln_param["layer_norm"] = True
+    out, cache = batchnorm_forward(x.T, gamma.reshape((-1,1)), beta.reshape((-1,1)),ln_param)
+    out = out.T
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -428,7 +460,10 @@ def layernorm_backward(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    # так же используем код написанный для вычисления градиентов batch norm
+    # dgamma и dbeta в вычислениях должны размером (1,D): для каждого нейрона (признака) свои gamma и beta
+    dx, dgamma, dbeta = batchnorm_backward_alt(dout.T, cache) # dout.T (D,N)
+    dx = dx.T
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -477,8 +512,9 @@ def dropout_forward(x, dropout_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
-
+        # Выборка из равномерного распределения значений от 0 до 1
+        mask = (np.random.rand(*x.shape) < p) / p # inverted dropout
+        out = x*mask
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
         #                           END OF YOUR CODE                          #
@@ -489,8 +525,8 @@ def dropout_forward(x, dropout_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
-
+        out = x
+       
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
         #                            END OF YOUR CODE                         #
@@ -520,7 +556,8 @@ def dropout_backward(dout, cache):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        # обучаются только те нейроны выход которых был !=0, и домножаем на 1/p
+        dx = dout * mask
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
