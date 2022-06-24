@@ -603,7 +603,38 @@ def conv_forward_naive(x, w, b, conv_param):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    '''
+    создадим массив заполненый нулями с размером вывода слоя сертки. Значения этого массива будут
+    изменены вычисленые значения в результате сверток рецептивных полей и весов.
+    '''
+    N, C, H, W = x.shape
+    F, C, HH, WW = w.shape
+    pad = conv_param["pad"]
+    stride = conv_param["stride"]
+
+    H_new = int( 1 + (H + 2*pad - HH ) / stride)
+    W_new = int( 1 + (W + 2*pad  - WW) / stride)
+    out = np.zeros((N, F, H_new, W_new))
+
+    n = 0
+    while n < N:
+      f = 0 
+      while f < F:
+        '''
+        Вычисляем карту активации применяя текущий фильтр.
+        Нужно вычислить скалярное произведение + bias отсчетов рецептивного поля во входном массиве и весов фильтра. Так по всему пространству ширины, высоты
+        используя веса текущего фильтра (так как применяется совместое использование весов нейронов одного среза глубины)
+        '''
+        h_new_i = 0 # используем индекс по уже вычисленному размеру высоты и ширины массива значений выходного слоя (кол-во нейронов по высоте и ширине)
+        x_pad = np.pad(x[n,:,:,:], ((0,0), (pad, pad), (pad, pad)), constant_values = 0) # по оси с кол-вом фильтров не добавляем значения (в этом случае массивы)
+        while h_new_i < H_new:
+          w_new_i = 0
+          while w_new_i < W_new:
+            out[n,f,h_new_i, w_new_i] = np.sum(x_pad[:, h_new_i*stride : h_new_i*stride + HH, w_new_i*stride :  w_new_i*stride + WW] * w[f]) + b[f]
+            w_new_i +=1
+          h_new_i +=1
+        f+=1
+      n+=1
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -632,8 +663,73 @@ def conv_backward_naive(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, w, b, conv_param = cache
+    
+    '''
+    Нужно вычислить dL/dw, dL/dx:  частные производные функции ошибки по точкам данных
+    и частные производные  по весам фильтров (нейронов) сверточного слоя
+      dL/dx = dL/dout * dout/dx;
+      dL/dw = dL/dout * dout/dw
+      dL/db = dL/dout * dout/db.
+    dL/dout - восходящие градиенты даны в массиве dout (N,F,H,W)
+    локальные градиенты:
+      dout/dx (N,C,H_pad,W_pad)
+      dout/dw (F,C,HH,WW)
+      dout/db (F)
+    Рассмотрим локальные градиенты где x,w - вектора, b - скаляр:
+      dout/dx = d(<x,w>+b)/dx = w
+      dout/dw = d(<x,w>+b)/dw = x
+      dout/db = d(<x,w>+b)/db = 1
+      
+      Так как нейроны сверточного слоя на одной глубине массива нейронов сверточного слоя используют одинаковые веса (w,b),
+      то градиенты dw будут вычислены для каждого нейрона со своим рецептивным полем на одной глубине и проссумированы.
+      Также суммарные градиенты весов dw для каждой глубины F будут проссумированы по экземплярам в батче.
+      Аналогично с градиентами по db: суммируем по каждому рецептивному полю одной глубины из F, затем по каждому экземпляру данных в батче.
+      
+      Точки входных данных одного и того же рецептивного поля исользуются каждым нейронои по глубине F. К тому же рецептивные
+      поля нейронов расположенных рядом по высоте,ширине погут пересекаться. Поэтому суммирование градиентов по данным dx
+      будет производиться полностью по глубине F и частично локально по ширине,высоте (если там будет пересечение рецептив. полей).
 
+      Также следует учесть, что входом сверточного слоя был массив x в котором границы дополнены нулями (padding).
+      И массив локальных градиентов dout/dx будте размером (N,С, H+2*pad, W+2*pad) и высчитав градиент dL/dx следует 
+      обрезать массив до (N,C,H,W)
+
+    '''
+
+    N, F, Hnew_pad, Wnew_pad = dout.shape # формула размера выхода слоя по одной оси: Hnew = (H + 2*pad - HH)/stride  + 1
+    N, C, H, W = x.shape 
+    F, C, HH, WW = w.shape
+    pad = conv_param["pad"]
+    stride = conv_param["stride"]
+
+    dw = np.zeros((F, C, HH, WW))
+    dx = np.zeros((N,C,H,W))
+
+    db = np.sum(dout, axis = (0,2,3))
+
+    n = 0
+    while n < N:
+      f = 0
+      dx_buff = np.zeros((C,H+2*pad,W+2*pad))
+      while f < F:
+        x_pad = np.pad(x,((0,0), (0,0), (pad,pad), (pad,pad)))
+        h_new_i = 0
+        dw_buff_for_depth_slice = np.zeros((C, HH, WW)) # тут хранится и обновляется сумма градиентов (локальные * восходящие) весов dw по карте активации
+        while h_new_i < Hnew_pad:
+          w_new_i = 0
+          while w_new_i < Wnew_pad:
+            dw_buff_for_depth_slice += x_pad[n,:,h_new_i*stride: h_new_i*stride + HH,
+                            w_new_i*stride: w_new_i*stride + WW] * dout[n,f,h_new_i, w_new_i] # (C, HH, WW) * 1
+
+            dx_buff[:,h_new_i*stride: h_new_i*stride + HH,
+                      w_new_i*stride: w_new_i*stride + WW] += w[f,:,:,:] * dout[n,f,h_new_i,w_new_i] # (C, HH, WW) * 1
+            w_new_i +=1
+          h_new_i +=1
+        dw[f] += dw_buff_for_depth_slice # += так как еще суммирование градиентов по экземплярам в батче
+        f+=1
+        dx[n]= dx_buff[:,pad:-pad,pad:-pad] 
+      n+=1
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -665,8 +761,37 @@ def max_pool_forward_naive(x, pool_param):
     # TODO: Implement the max-pooling forward pass                            #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
+    N,C,H,W = x.shape
+    pool_h = pool_param['pool_height']
+    pool_w = pool_param['pool_width']
+    stride = pool_param['stride']
+    H_new, W_new = int((1 + (H - pool_h)/stride)), int((1 + (W - pool_w)/stride))
+    out = np.zeros((N,C, H_new, W_new))
+    
+    '''
+    n = 0
+    while n < N:
+      c = 0
+      while c < C:
+        hi = 0
+        while hi < H_new:
+          wi = 0 
+          while wi < W_new:
+            out[n,c,hi,wi] = np.max(x[n,c,hi*stride : hi*stride + pool_h,
+                                          wi*stride : wi*stride + pool_w])
+            wi+=1
+          hi+=1
+        c+=1
+      n+=1
+    '''
+    hi = 0
+    while hi < H_new:
+      wi = 0 
+      while wi < W_new:
+        out[:,:,hi,wi] = np.max(x[:,:,hi*stride : hi*stride + pool_h,
+                                          wi*stride : wi*stride + pool_w], axis = (-1,-2))
+        wi+=1
+      hi+=1
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -693,8 +818,41 @@ def max_pool_backward_naive(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    '''
+    dL/dx = dL/dout * dout/dx
+    dout/dx = 1 , если этот xi максимум по окну
+            = 0 иначе
+    обратное распространение для операции max(x,y) означет то что градиент проходит только для числа 
+    которое было максимальным из x,y, для остальных производная dL/dxi = 0
 
+    '''
+    x, pool_param = cache
+    N,C,H,W = x.shape
+    pool_h = pool_param['pool_height']
+    pool_w = pool_param['pool_width']
+    stride = pool_param['stride']
+    
+    H_pool,W_pool = int((1 + (H - pool_h)/stride)), int((1 + (W - pool_w)/stride))
+
+
+    dx = np.zeros(x.shape)
+
+    n = 0
+    while n < N:
+      c = 0
+      while c < C:
+        hi = 0
+        while hi < H_pool:
+          wi = 0 
+          while wi < W_pool:
+            pool_arr = x[n,c,hi*stride : hi*stride + pool_h, wi*stride : wi*stride + pool_w]
+            max_index = np.unravel_index(pool_arr.argmax(), pool_arr.shape) # (i,j)
+            dx[n,c,hi*stride + max_index[0], wi*stride + max_index[1]] = dout[n,c,hi,wi]
+            wi+=1
+          hi+=1
+        c+=1
+      n+=1
+ 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
