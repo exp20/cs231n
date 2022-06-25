@@ -63,7 +63,24 @@ class ThreeLayerConvNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        '''
+        conv - relu - 2x2 max pool - affine - relu - affine - softmax
+        '''
+        
+        self.params["W1"] = np.random.randn(num_filters, input_dim[0], filter_size, filter_size ) * weight_scale
+        self.params["b1"] = np.zeros(num_filters)
+        
+        # выход сверточного слоя (N, F, H, W), полносвязный слой (кол-во весов (входов), кол-во нейронов)
+        # padding и stride по условию уже выбраны для сохранения ширины и высоты входных данных
+        # еще нужно учеть размер выхода после операции pooling
+        Hp = int(1+(input_dim[1] - 2)/2) # input_dim так как обусловлено что ширина и высота выхода сверт слоя равны входным данным x
+        Wp = int(1+(input_dim[2] - 2)/2)
+        self.params["W2"] = np.random.randn(num_filters*Hp*Wp, hidden_dim) * weight_scale
+        self.params["b2"] = np.zeros(hidden_dim)
+        
+        # последний полносвязный слой который вычислиет оценки для каждого из num_classes классов
+        self.params["W3"] = np.random.randn(hidden_dim, num_classes) * weight_scale
+        self.params["b3"] = np.zeros(num_classes)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -101,8 +118,12 @@ class ThreeLayerConvNet(object):
         # cs231n/layer_utils.py in your implementation (already imported).         #
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-        pass
+        
+        N = X.shape[0]
+        conv_relu_pool_out, cache_conv_relu_pool = conv_relu_pool_forward(X,self.params["W1"], self.params["b1"],conv_param,pool_param )
+        h1_out, cache_h1 = affine_relu_forward(conv_relu_pool_out,self.params["W2"], self.params["b2"]) # тут не нужно reshape вывода сверточного слоя
+        # так как в affine_forward уже выполняется преобразование формы входа как .reshape(N,-1)
+        scores, cache_h2 = affine_forward(h1_out,self.params["W3"], self.params["b3"])
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -125,7 +146,23 @@ class ThreeLayerConvNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        data_loss, d_loss_input = softmax_loss(scores,y)
+        regularization_loss = 0.5*self.reg*np.sum((np.sum(self.params["W1"]**2), np.sum(self.params["W2"]**2), np.sum(self.params["W3"]**2)))
+        loss = data_loss + regularization_loss
+
+        grads["W1"] = self.reg*self.params["W1"]
+        grads["W2"] = self.reg*self.params["W2"]
+        grads["W3"] = self.reg*self.params["W3"]
+
+
+        dh2_input, dw3, grads["b3"] = affine_backward(d_loss_input, cache_h2)
+        grads["W3"]+=dw3
+
+        dh1_input, dw2, grads["b2"] = affine_relu_backward(dh2_input, cache_h1)
+        grads["W2"]+=dw2
+
+        dx, dw1, grads["b1"] = conv_relu_pool_backward(dh1_input, cache_conv_relu_pool)
+        grads["W1"] += dw1
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
