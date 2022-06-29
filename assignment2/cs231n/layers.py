@@ -994,20 +994,20 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     статистики для нормализации вычисляются по одному экземпляру данных, по всей ширине, высоте,
     по глубине согласно разбиению на группы. То есть для каждой группы в общем случае свое кол-во каналов
     
-    G: целое число груп. должен быть делителем C
+    G: целое число груп. должен быть делителем C по условию
     gamma,beta : (C,)
     '''
     N,C,H,W = x.shape
     # C/G - кол-во каналов в группе
     C_per_G = int(C/G) # по условию G - делитель C, поэтому не будет явного округления.
     
-    # (N,C,H,W) -> (над в двумерный массив чтоб выполнять операции нормализации)
+    # (N,C,H,W) -> (нужно преобразовать в двумерный массив чтоб выполнять операции для нормализации)
     # (N,C,H,W) -> (N*G, C/G * H * W) всего N*G групп (для разных экземпляров данных разные группы)
     x = x.reshape(N*G,C_per_G*H*W) 
-    # для выполнения разности двух массивов изменим форму x
+    # для вычисления разности двух массивов изменим форму x
     x = x.T # (C/G*H*W, N*G), C/G*H*W - кол-во признаков num_fts, N*G - обшее кол-во групп по всем экземплярам
     mx = np.mean(x, axis = 0) # (N*G)
-    x_centered = x-mx # (num_fts, N*G)
+    x_centered = x-mx # (num_fts, N*G) num_fts - кол-во признаков в группе = C/G*H*W
     centered_x_sq = x_centered**2
     var = np.mean(centered_x_sq, axis = 0) # (N*G)
     std = np.sqrt(var + eps)
@@ -1019,9 +1019,9 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     beta = beta.reshape(1,C,1,1)
 
     out = gamma*x_normed + beta
-    cache = (gamma,x_normed,inverted_std,x_centered,std,var,eps, C_per_G, G) # добавляем информацию о кол-ве каналов в группе и кол-ве групп
+    cache = (gamma,x_normed,inverted_std,x_centered,std,var,eps, C_per_G, G) # добавляем в кэш инфу о кол-ве каналов в группе и кол-ве групп
 
-    # не зависит как и layer norm от типа процесса использования: в процессе train или test
+    # Group Normalization не зависит как и layer norm от типа процесса использования: train/test
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -1054,33 +1054,33 @@ def spatial_groupnorm_backward(dout, cache):
     N,C,H,W = dout.shape
     gamma,x_normed,inverted_std,x_centered,std,var,eps,C_per_G,G = cache
 
-    # градиенты суммируются по размеру батча (так как обучаемся по нескольким экземплярам)
-    # так и по H,W так как влияют на выход каждого нейрона
-    dbeta = np.sum(dout, axis = (0,2,3), keepdims=True) # (1,C,1,1) ! размер не соответствует описанию выше : (C,). НО проходит проверку
-    # локальный градиент x_normed (N,C,H,W)
-    dgamma = np.sum(dout*x_normed, axis = (0,2,3), keepdims=True) # должно быть поэлементное умножение тензоров и сумма -> (1,C,1,1)
+    # для dbeta, dgamma градиенты суммируются по размеру батча (так как обучаемся по нескольким экземплярам)
+    # так и по H,W так как влияют на выход каждого нейрона одного среза глубины
+    dbeta = np.sum(dout, axis = (0,2,3), keepdims=True) # (1,C,1,1) ! размер не соответствует описанию выше : (C,). Иначе не проходит проверку
+    # локальный градиент по dgamma : x_normed (N,C,H,W)
+    dgamma = np.sum(dout*x_normed, axis = (0,2,3), keepdims=True) # поэлементное умножение тензоров и сумма -> (1,C,1,1)
 
     dx_normed = dout*gamma.reshape(1,C,1,1) # поэлементное умножение  (N,C,H,W)
     # преобразование в форму которая использовалась в прямом проходе для x_normed
     dx_normed = np.reshape( dx_normed , (N*G, C_per_G * H * W)).T # (num_fts, N*G)
    
     '''
-    Тут дальше можно реализовать обратное распространение на основе информации о последовательных операций в spatial_groupnorm_forward.
-    Либо использовать уже упрощеный написанный код для прямого вычисления dx см batch_norm_backward_alt для условия layer_norm,
+    Тут дальше можно реализовать обратное распространение на основе вычисления прямого прохода в функции spatial_groupnorm_forward.
+    Либо использовать уже упрощеный написанный код для прямого вычисления dx по выведенной формуле см batch_norm_backward_alt для условия layer_norm,
     внеся некоторые изменения
     '''
-    
     dL_dx_normed = dx_normed
-    # изменения относит batch_norm_backward_alt для условия layer_norm [
-    dout_gamma = dout*gamma
-    dout_gamma = np.reshape( dout_gamma , (N*G, C_per_G * W * H)).T # (N,C,H,W) -> (N*G, C_per_G*H*W) = (N*G,num_fts) -> (num_fts, N*G)
+    # изменения относительно batch_norm_backward_alt для условия layer_norm 
+    # [
+    dout_mul_gamma = dout*gamma
+    dout_mul_gamma = np.reshape( dout_mul_gamma , (N*G, C_per_G * W * H)).T # (N,C,H,W) -> (N*G, C_per_G*H*W) = (N*G,num_fts) -> (num_fts, N*G)
     C_per_G_W_H = C_per_G*W*H
-    #  ]
+    # ]
 
     # Dx - дисперсия, mx - мат. ожидание
     dL_dDx = np.sum(dL_dx_normed*x_centered, axis = 0)*-0.5*inverted_std**3  # (N*G)
     dL_dmx =  np.sum(-dL_dx_normed/std, axis = 0)  # (num_gr)
-    dx =  dL_dDx*2*x_centered/C_per_G_W_H + dL_dmx/C_per_G_W_H + inverted_std*dout_gamma # (num_fts, N*G)
+    dx =  dL_dDx*2*x_centered/C_per_G_W_H + dL_dmx/C_per_G_W_H + inverted_std*dout_mul_gamma # (num_fts, N*G)
     
     dx = np.reshape(dx.T, (N,C,H,W)) # (num_fts, N*G) -> (N*G,num_fts) = (N*G, C_per_G * H * W) -> (N,С,H,W)
 
