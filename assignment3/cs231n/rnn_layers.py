@@ -36,7 +36,12 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+
+    # tanh( h*Wh + x*Wx + b )
+    # h*Wh: (N,H)x(H,H) = (N,H) 
+    # x*Wx: (N,D)x(D,H) = (N,H)
+    next_h = np.tanh(prev_h.dot(Wh) + x.dot(Wx) + b) # (N,H)
+    cache = [prev_h, Wh, Wx, x, next_h]
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -69,8 +74,28 @@ def rnn_step_backward(dnext_h, cache):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
-
+    '''
+      Производная гиперболического тангенса:
+        th`(x) = 1-th(x)^2
+        => th`(...) = 1-th(...)^2 = 1-next_h^2
+    '''
+    prev_h, Wh, Wx, x, next_h = cache
+    dth = 1 - next_h**2
+    
+    # O - Произведение Адамара, при умножении производных тангенса
+    # th`(t+1) O th`(t) - производная внешн th умножается на проивздн. внутреннего th
+    # так как  th(th(t))
+    dth_mul_dth = dnext_h*dth # (N,H)O(N,H) 
+    
+    '''
+      Y = XW, dY/dX = W, dY/dW = X.T
+    '''
+    dprev_h = dth_mul_dth.dot(Wh.T) # th`(t+1) O th`(t)x(произвдн мартичн умножения)
+    dWh = prev_h.T.dot(dth_mul_dth)  # (H,N)x(N,H) = (H,H)
+    dWx = x.T.dot(dth_mul_dth) #  (D,N)x(N,H) = (D,H)
+    dx = dth_mul_dth.dot(Wx.T) # (N,H)x(H,D) = (N,D)
+    db = np.sum(dth_mul_dth, axis = 0)
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -103,9 +128,16 @@ def rnn_forward(x, h0, Wx, Wh, b):
     # above. You can use a for loop to help compute the forward pass.            #
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
-
+    cache = []
+    h = []
+    step_h = h0
+    for time_step_batch in x.transpose(1,0,2):
+      #step_h: (N,H) ; step_cache = (prev_h, Wh, Wx, x, next_h)
+      step_h, step_cache = rnn_step_forward(time_step_batch, step_h, Wx, Wh, b) 
+      cache.append(step_cache)
+      h.append(step_h)
+    cache = np.asarray(cache, dtype = object) # dtype = object - из-за разных размеров вложенных массивов
+    h = np.asarray(h).transpose(1,0,2) # (T,N,H)->(N,T,H)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -140,8 +172,33 @@ def rnn_backward(dh, cache):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
-
+    # dnext_h (N,H)
+    
+    #step_cache : ( (t-1)_h, Wh, Wx, x, (t)_h)
+    dx = []
+    i = 1
+    dWx = 0
+    dWh = 0
+    db = 0
+    '''
+    Так как скрытое состояние h_t используется для оценки y_t и для вычис. h_t+1,
+    то нужно сложить восходящие градиенты dy_t и dh_t+1
+    '''
+    dh_t_upstream = 0 # начинаем с последжнего состояния которое идет только для вычисления y_T
+    # НЕ забыть что идем в ОБРАТНОМ порядке по последовательности
+    for dy_timestep_upstream in dh.transpose(1,0,2)[::-1]: # (N,T,H)->(T,N,H)
+      #(N,D),(N,H),(D,H),(H,)
+      dx_t, dh_t_upstream, dWx_t, dWh_t, db_t = rnn_step_backward(dh_t_upstream + dy_timestep_upstream, cache[-i])
+      # Суммируем градиенты весов для каждого временного шага, так как веса уч. в выч. на каждом временном шаге
+      dWx += dWx_t
+      dWh += dWh_t
+      db += db_t
+      # dx это градиент по элементам последовательности 
+      dx.append(dx_t)
+      i+=1
+    dx = np.asarray(dx)[::-1].transpose(1,0,2)
+    dh0 = dh_t_upstream
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
