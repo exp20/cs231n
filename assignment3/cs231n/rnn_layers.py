@@ -302,17 +302,16 @@ def word_embedding_backward(dout, cache):
     # избавляемся от размерности T и представляем все слова одним батчем
     all_words = x.ravel() # массив полученных слов на входе, которые представлены индексом в словаре.
     all_embedded_words_upstream_grad = dout.reshape(N*T,D) # восходящий градиент для каждого embedded слова
-    # так как используется np.add.at создаем нулевой массив размером с (N*T,D), так как будет выполнятся суммирование строк из 
+    # так как используется np.add.at создаем нулевой массив размером с (V,D), так как будет выполнятся суммирование строк из 
     # all_embedded_words_upstream_grad : (N*T,D)
     # индексы которых содержатся в all_words: (N*T)
-    sum_grads = np.zeros((N*T,D)) # (N*T,D)
+    sum_grads = np.zeros((V,D)) # (V,D)
     '''
       строка из all_embedded_words_upstream_grad с номером i суммируется к строке
-      из sum_grads с номером all_words[i]
+      из sum_grads с номером all_words[i] (это как раз индекс слова в словаре)
     '''
     np.add.at(sum_grads, all_words, all_embedded_words_upstream_grad)
-    dW = sum_grads[:V] # (N*T,D) -> (V,D)
-
+    dW = sum_grads
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #

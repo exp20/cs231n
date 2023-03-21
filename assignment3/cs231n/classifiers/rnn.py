@@ -151,7 +151,29 @@ class CaptioningRNN(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        # Вычисление начального скрытого состояния. Исп. признаки изображения.
+        H0, h0_cache = affine_forward(features, W_proj, b_proj) # (N,F)x(F,H) + H = (N,H)
+
+        # Эмбеддинг подписей полученых для обучения
+        embedded_words, embedded_cache = word_embedding_forward(captions_in, W_embed) # (N,T,D)
+
+        # Вычисление последовательности векторов (N,T,H) скрытых состояний 
+        H_t, rnn_forward_cahce = rnn_forward(x = embedded_words, h0 = H0, Wx = Wx, 
+                                                      Wh = Wh, b = b)
+        
+        # Вычисление оценок слов (N,T,V) по полученным векторам скрытых состояний
+        words_scores, temporal_affine_cache = temporal_affine_forward(x = H_t, w = W_vocab, b = b_vocab)
+
+        # Вычислении функции потерь и градиент функции потерь по входным данным
+        # и используем макску для слов которые являются токенами заполнителями: <NULL>
+        loss, dwords_scores = temporal_softmax_loss(x = words_scores, y = captions_out, mask = mask)
+
+        # Backpropagation
+        
+        dH_t,  grads["W_vocab"], grads["b_vocab"] = temporal_affine_backward(dwords_scores, temporal_affine_cache)
+        dembedded_words, dH0, grads["Wx"], grads["Wh"], grads["b"] = rnn_backward(dH_t, rnn_forward_cahce)
+        grads["W_embed"] = word_embedding_backward(dembedded_words, embedded_cache)
+        _, grads["W_proj"], grads["b_proj"] = affine_backward(dH0, h0_cache)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
