@@ -131,7 +131,8 @@ def rnn_forward(x, h0, Wx, Wh, b):
     cache = []
     h = []
     step_h = h0
-    for time_step_batch in x.transpose(1,0,2):
+    for time_step_batch in x.transpose(1,0,2): # (N,T,H) -> (T,N,H)
+      # time_step_batch: (N,H)
       #step_h: (N,H) ; step_cache = (prev_h, Wh, Wx, x, next_h)
       step_h, step_cache = rnn_step_forward(time_step_batch, step_h, Wx, Wh, b) 
       cache.append(step_cache)

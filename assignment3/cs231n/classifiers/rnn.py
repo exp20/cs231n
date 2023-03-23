@@ -169,7 +169,6 @@ class CaptioningRNN(object):
         loss, dwords_scores = temporal_softmax_loss(x = words_scores, y = captions_out, mask = mask)
 
         # Backpropagation
-        
         dH_t,  grads["W_vocab"], grads["b_vocab"] = temporal_affine_backward(dwords_scores, temporal_affine_cache)
         dembedded_words, dH0, grads["Wx"], grads["Wh"], grads["b"] = rnn_backward(dH_t, rnn_forward_cahce)
         grads["W_embed"] = word_embedding_backward(dembedded_words, embedded_cache)
@@ -241,7 +240,36 @@ class CaptioningRNN(object):
         ###########################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        '''
+          Для применения уже написанного кода исползуются операции втсавки и удадения 
+          фиктивных размерностей массивов
+        '''
+        
+        input_words = self._start * np.ones((N,1), dtype=np.int32)  # батч слов выведенных сетью на предыдущем шаге (или токены start вначале)
+        input_embedded_words, _ = word_embedding_forward(input_words, W_embed) # (N,1,D)
+        input_embedded_words = np.squeeze(input_embedded_words) # (N,1,D) -> (N,D)
+        
+        prev_h, _ = affine_forward(features, W_proj, b_proj) # (N,H)
+        
+
+        for t in range(max_length):
+
+          ht, _ = rnn_step_forward(input_embedded_words, prev_h, Wx, Wh, b) # (N,H)
+          ht = np.expand_dims(ht, axis=1) # (N,H) -> (N,1,H)
+          
+          vocabulary_words_scores, _= temporal_affine_forward(x = ht, w = W_vocab, b = b_vocab) # (N,1,V)
+          vocabulary_words_scores = np.squeeze(vocabulary_words_scores) # (N,1,V) -> (N,V)
+
+          out_words_t = np.argmax(vocabulary_words_scores, axis = 1) # (N)
+         
+          captions[:,t] = out_words_t
+          
+          out_words_t = np.expand_dims(out_words_t, 1)
+          input_embedded_words, _ = word_embedding_forward(out_words_t, W_embed) # (N,1,D)
+          input_embedded_words = np.squeeze(input_embedded_words)
+
+          prev_h = np.squeeze(ht) # (N,1,H) -> (N,H)
+          
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
