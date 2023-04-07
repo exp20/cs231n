@@ -41,10 +41,10 @@ Open up either [PyTorch.ipynb](https://github.com/exp20/cs231n/blob/main/assignm
 ### Assignment 3
 
 #### Q1: Image Captioning with Vanilla RNNs (29 points)
-The notebook `RNN_Captioning.ipynb` will walk you through the implementation of an image captioning system on MS-COCO using vanilla recurrent networks.
+The notebook [RNN_Captioning.ipynb](https://github.com/exp20/cs231n/blob/main/assignment3/RNN_Captioning.ipynb) will walk you through the implementation of an image captioning system on MS-COCO using vanilla recurrent networks.
 
 #### Q2: Image Captioning with LSTMs (23 points)
-The notebook `LSTM_Captioning.ipynb` will walk you through the implementation of Long-Short Term Memory (LSTM) RNNs, and apply them to image captioning on MS-COCO.
+The notebook [LSTM_Captioning.ipynb](https://github.com/exp20/cs231n/blob/main/assignment3/LSTM_Captioning.ipynb) will walk you through the implementation of Long-Short Term Memory (LSTM) RNNs, and apply them to image captioning on MS-COCO.
 
 #### Q3: Network Visualization: Saliency maps, Class Visualization, and Fooling Images (15 points)
 The notebooks `NetworkVisualization-TensorFlow.ipynb`, and `NetworkVisualization-PyTorch.ipynb` will introduce the pretrained SqueezeNet model, compute gradients with respect to images, and use them to produce saliency maps and fooling images. Please complete only one of the notebooks (TensorFlow or PyTorch). No extra credit will be awardeded if you complete both notebooks.
