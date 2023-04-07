@@ -157,9 +157,16 @@ class CaptioningRNN(object):
         # Эмбеддинг подписей полученых для обучения
         embedded_words, embedded_cache = word_embedding_forward(captions_in, W_embed) # (N,T,D)
 
-        # Вычисление последовательности векторов (N,T,H) скрытых состояний 
-        H_t, rnn_forward_cahce = rnn_forward(x = embedded_words, h0 = H0, Wx = Wx, 
-                                                      Wh = Wh, b = b)
+        # Вычисление последовательности батчей векторов (N,T,H) скрытых состояний 
+        H_t, forward_cahce = None, None
+        if(self.cell_type == "rnn"):
+          H_t, forward_cahce = rnn_forward(x = embedded_words, h0 = H0, Wx = Wx, 
+                                               Wh = Wh, b = b)
+
+        if(self.cell_type == "lstm"):
+          H_t, forward_cahce = lstm_forward(x = embedded_words, h0 = H0, Wx = Wx, 
+                                               Wh = Wh, b = b)
+
         
         # Вычисление оценок слов (N,T,V) по полученным векторам скрытых состояний
         words_scores, temporal_affine_cache = temporal_affine_forward(x = H_t, w = W_vocab, b = b_vocab)
@@ -170,7 +177,14 @@ class CaptioningRNN(object):
 
         # Backpropagation
         dH_t,  grads["W_vocab"], grads["b_vocab"] = temporal_affine_backward(dwords_scores, temporal_affine_cache)
-        dembedded_words, dH0, grads["Wx"], grads["Wh"], grads["b"] = rnn_backward(dH_t, rnn_forward_cahce)
+        
+        dembedded_words, dH0, grads["Wx"], grads["Wh"], grads["b"] = None, None, None, None, None
+        if(self.cell_type == "rnn"):
+          dembedded_words, dH0, grads["Wx"], grads["Wh"], grads["b"] = rnn_backward(dH_t, forward_cahce)
+
+        if(self.cell_type == "lstm"):
+          dembedded_words, dH0, grads["Wx"], grads["Wh"], grads["b"] = lstm_backward(dH_t, forward_cahce)
+        
         grads["W_embed"] = word_embedding_backward(dembedded_words, embedded_cache)
         _, grads["W_proj"], grads["b_proj"] = affine_backward(dH0, h0_cache)
 
@@ -241,7 +255,7 @@ class CaptioningRNN(object):
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
         '''
-          Для применения уже написанного кода исползуются операции втсавки и удадения 
+          Для применения уже написанного кода исползуются операции вставки и удаления 
           фиктивных размерностей массивов
         '''
         
@@ -251,10 +265,18 @@ class CaptioningRNN(object):
         
         prev_h, _ = affine_forward(features, W_proj, b_proj) # (N,H)
         
+        prev_c = 0
 
         for t in range(max_length):
+          ht = None
+          if (self.cell_type == "rnn"):
+            ht, _ = rnn_step_forward(input_embedded_words, prev_h, Wx, Wh, b) # (N,H)
 
-          ht, _ = rnn_step_forward(input_embedded_words, prev_h, Wx, Wh, b) # (N,H)
+          if (self.cell_type == "lstm"):
+            ht, ct, _ = lstm_step_forward(input_embedded_words, prev_h, prev_c, Wx, Wh, b) # (N,H)
+            prev_c = ct
+         
+
           ht = np.expand_dims(ht, axis=1) # (N,H) -> (N,1,H)
           
           vocabulary_words_scores, _= temporal_affine_forward(x = ht, w = W_vocab, b = b_vocab) # (N,1,V)

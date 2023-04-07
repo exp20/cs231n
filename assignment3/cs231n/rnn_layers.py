@@ -138,7 +138,7 @@ def rnn_forward(x, h0, Wx, Wh, b):
       cache.append(step_cache)
       h.append(step_h)
     cache = np.asarray(cache, dtype = object) # dtype = object - из-за разных размеров вложенных массивов
-    h = np.asarray(h).transpose(1,0,2) # (T,N,H)->(N,T,H)
+    h = np.asarray(h, dtype = float).transpose(1,0,2) # (T,N,H)->(N,T,H)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -185,7 +185,7 @@ def rnn_backward(dh, cache):
     Так как скрытое состояние h_t используется для оценки y_t и для вычис. h_t+1,
     то нужно сложить восходящие градиенты dy_t и dh_t+1
     '''
-    dh_t_upstream = 0 # начинаем с последжнего состояния которое идет только для вычисления y_T
+    dh_t_upstream = 0 # начинаем с последнего состояния которое идет только для вычисления y_T
     # НЕ забыть что идем в ОБРАТНОМ порядке по последовательности
     for dy_timestep_upstream in dh.transpose(1,0,2)[::-1]: # (N,T,H)->(T,N,H)
       #(N,D),(N,H),(D,H),(H,)
@@ -197,7 +197,7 @@ def rnn_backward(dh, cache):
       # dx это градиент по элементам последовательности 
       dx.append(dx_t)
       i+=1
-    dx = np.asarray(dx)[::-1].transpose(1,0,2)
+    dx = np.asarray(dx, dtype = float)[::-1].transpose(1,0,2)
     dh0 = dh_t_upstream
     
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -362,9 +362,18 @@ def lstm_step_forward(x, prev_h, prev_c, Wx, Wh, b):
     # You may want to use the numerically stable sigmoid implementation above.  #
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    H = int(prev_h.shape[1])
 
-    pass
+    gates_affine_result = prev_h.dot(Wh)+x.dot(Wx)+b # (N,H)x(H,4H) + (N,D)x(D,4H) + (4H,) = (N,4H)
+    i = sigmoid(gates_affine_result[:,:H])
+    f = sigmoid(gates_affine_result[:,H:2*H])
+    o = sigmoid(gates_affine_result[:,2*H:3*H])
+    g = np.tanh(gates_affine_result[:,3*H:])
 
+    next_c = f*prev_c + i*g
+    next_h = o*np.tanh(next_c)
+
+    cache = (next_c, prev_c, prev_h, x, Wh, Wx, i,f,o,g)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -399,8 +408,58 @@ def lstm_step_backward(dnext_h, dnext_c, cache):
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    '''
+    d tahn(x)/dx  = 1-tanh(x)^2
+    d sigmd(x)/dx = sigmd(x)(1 - sigmd(x))
+    '''
+    next_c, prev_c, prev_h, x, Wh, Wx, i,f,o,g = cache
+    N,H = prev_h.shape
+    
+    # dL/do
+    do = dnext_h*np.tanh(next_c)
+    # dL/dnext_c
+    dnext_c += dnext_h*o*(1-np.square(np.tanh(next_c)))
+    # dL/di
+    di = dnext_c * g 
+    # dL/df
+    df = dnext_c * prev_c
+    # dL/dg
+    dg = dnext_c * i
+    # dL/dprev_c
+    dprev_c = dnext_c * f 
 
+    '''
+     A = H_t-1 x Wh + X_t x Wx + b
+     i = sigm(A_i), f = sigm(A_f), o = sigm(A_o), g = tanh(A_g)
+     dL/W_i = dL/dgate_i * dgate_i/dA_i * dA_i/dW_i, где dgate_i/dA_i = i(1-i)
+                                                     а для g : dgate_g/dA_g = (1-g^2)
+     Аналогично и для Wx
+     Для каждого гейта сохраним в отдельные переменные локальные градиенты: dL/dA_
+    '''
+    dL_dA_i =  i*(1-i) * di # (N,H)
+    dL_dA_f =  f*(1-f) * df
+    dL_dA_o =  o*(1-o) * do
+    dL_dA_g =  (1-np.square(g)) * dg
+    dL_dA = np.hstack((dL_dA_i,dL_dA_f,dL_dA_o,dL_dA_g)) # (N,4H)
+
+    #dA/dWh_i = dA/dWh_f = dA/dWh_o = dA/dWh_g = prev_h.T :  dA_dWh # (H,N)
+    dA_dWh = prev_h.T #(H,N)
+    dWh = dA_dWh.dot(dL_dA) # (H,N)x(N,4H)
+    
+    dA_dWx = x.T #(D,N)
+    dWx = dA_dWx.dot(dL_dA) # (D,N)x(N,4H)
+
+    
+    # dL/dprev_h =  (dL/di * di/dprev_h) + (dL/df * df/dprev_h) + ... .
+    # A = H_t-1 x Wh + X_t x Wx + b
+    # dL/dH_t-1 = dL/dA * dA/dH_t-1
+    # dA/dH_t-1 = Wh
+    dprev_h = dL_dA.dot(Wh.T) # (N,4H)x(4H,H)
+    
+    dx = dL_dA.dot(Wx.T) # (N,4H)x(4H,D)
+    
+    db = np.sum(dL_dA, axis = 0)
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -437,9 +496,16 @@ def lstm_forward(x, h0, Wx, Wh, b):
     # You should use the lstm_step_forward function that you just defined.      #
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
-
+    cache = []
+    h = []
+    h_t = h0
+    c_t = np.zeros(h0.shape)
+    for time_step_batch in x.transpose(1,0,2): # for (N,D) in (T,N,D) 
+      h_t, c_t, cache_t = lstm_step_forward(time_step_batch, prev_h = h_t, prev_c = c_t, Wx = Wx, Wh = Wh, b = b)
+      cache.append(cache_t)
+      h.append(h_t)
+    cache = np.asarray(cache, dtype = object)
+    h = np.asarray(h, float).transpose(1,0,2) # (T,N,H) -> (N,T,H).
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -469,9 +535,32 @@ def lstm_backward(dh, cache):
     # You should use the lstm_step_backward function that you just defined.     #
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    dx, dh0, dWx, dWh, db = [],0,0,0,0
+    N,_,H = dh.shape
+    dnext_c = 0
+    dnext_h = 0
+   
+    i = 1
+    for dh_next_time_step in dh.transpose(1,0,2)[::-1]: # (N,T,H) -> (T,N,H)
+    
+      time_step_cache = cache[-i] # cache : (T, ...)
 
-    pass
+      dnext_h += dh_next_time_step
+      
+      dx_t, dprev_h, dprev_c, dWx_t, dWh_t, db_t = lstm_step_backward(dnext_h = dnext_h, 
+                                                                       dnext_c = dnext_c, cache = time_step_cache)
+      dnext_c = dprev_c
+      dnext_h = dprev_h
 
+      dx.append(dx_t)
+      dWx += dWx_t
+      dWh += dWh_t
+      db += db_t
+      
+      i += 1
+
+    dx = np.asarray(dx, dtype = float)[::-1].transpose(1,0,2) # сначала восстанавливаем порядок по времени, затем (T,N,D) -> (N,T,D) 
+    dh0 = dnext_h
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
