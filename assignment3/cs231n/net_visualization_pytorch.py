@@ -56,6 +56,7 @@ def compute_saliency_maps(X, y, model):
       Чем больше значение карты значимости для пикселя, тем сильнее этот пиксель влияет на значение
       функции оценки для истинного класса (увеличивает или уменьшает оценку).
     '''
+    
     saliency, _ = torch.max(X.grad.abs(), axis = 1)
     
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -97,8 +98,6 @@ def make_fooling_image(X, target_y, model):
     # You can print your progress over iterations to check your algorithm.       #
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-
     max_iterations = 100
     for i in range(0,max_iterations):
 
@@ -116,6 +115,8 @@ def make_fooling_image(X, target_y, model):
       # обновление входного изображения
       with torch.no_grad():
         X_fooling += learning_rate * X_fooling.grad/X_fooling.grad.norm(p=2)
+
+      X_fooling.grad.zero_()
 
       print("Номер итерации ", i)
       i+=1
@@ -135,13 +136,23 @@ def class_visualization_update_step(img, model, target_y, l2_reg, learning_rate)
     # Be very careful about the signs of elements in your code.            #
     ########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
-
+    
+    scores = model.forward(img)
+    target_score = scores[0,target_y]
+    loss = target_score - l2_reg*img.pow(2).sum()
+   
+    model.zero_grad()
+    loss.backward()
+   
+    with torch.no_grad():
+      img += learning_rate * img.grad/img.grad.norm(p=2)
+    img.grad.zero_() # так как img отдельно от модели, то отдельно обнуляем вычисленные градиенты для этого тензора
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ########################################################################
     #                             END OF YOUR CODE                         #
     ########################################################################
+    
 
 
 def preprocess(img, size=224):
